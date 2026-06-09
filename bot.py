@@ -5,8 +5,25 @@ import re
 import requests
 import telebot
 import random 
+import threading
 from dotenv import load_dotenv
+from flask import Flask
 from logger import log_user_message, log_bot_reply
+
+# ─── Fake Web Server for Render ─────────────────────────────
+# Render requires a web service to bind to a port. 
+# This creates a tiny invisible website so Render doesn't crash.
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "YT Thumbnail Bot is alive and running! 🤖"
+
+def run_web():
+    port = int(os.environ.get('PORT', 10000)) # Render looks for this specific port
+    app.run(host='0.0.0.0', port=port)
+# ─────────────────────────────────────────────────────────────
+
 # ─── Load Environment ───────────────────────────────────────
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -16,6 +33,8 @@ if not BOT_TOKEN:
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
+# Make sure ADMIN_ID is loaded 
+ADMIN_ID = os.getenv("ADMIN_ID")
 
 # ─── YouTube URL Patterns ───────────────────────────────────
 YOUTUBE_PATTERNS = [
@@ -62,8 +81,6 @@ def get_best_thumbnail(video_id: str) -> tuple[bytes | None, str]:
         try:
             response = requests.get(url, timeout=10)
             if response.status_code == 200 and len(response.content) > 1000:
-                # Content > 1KB means it's a real image, not YouTube's
-                # 404 placeholder (which is ~900 bytes)
                 return response.content, label
         except requests.RequestException:
             continue
@@ -117,8 +134,6 @@ def send_welcome(message):
     
         log_bot_reply(bot, message, video_title="Start/Help message")
 
-# Make sure ADMIN_ID is loaded at the top of your bot.py file
-ADMIN_ID = os.getenv("ADMIN_ID")
 
 # ─── Handle all user messages ───────────────────────────────
 @bot.message_handler(func=lambda message: message.chat.type == "private")
@@ -131,7 +146,6 @@ def handle_message(message):
 
     # ──────────────────────────────────────────────────────
     # 1. IF IT'S A YOUTUBE LINK -> FETCH THUMBNAIL
-    
     # ──────────────────────────────────────────────────────
     if video_id:
         log_user_message(bot, message)
@@ -202,8 +216,6 @@ def handle_message(message):
     except Exception as e:
         print(f"Forwarding error: {e}")
 
-    
-
 
 # ─── DIY LIVEGRAM: Send Admin's reply back to User ─────────
 @bot.message_handler(func=lambda message: str(message.from_user.id) == ADMIN_ID and message.reply_to_message)
@@ -220,8 +232,11 @@ def handle_admin_reply(message):
 
 
 # ─── Start the Bot ──────────────────────────────────────────
-# ─── Start the Bot ──────────────────────────────────────────
 if __name__ == "__main__":
+    # 1. Start the fake web server in a separate background thread
+    threading.Thread(target=run_web).start()
+    
+    # 2. Start the Telegram Bot
     print("🤖 YouTube Thumbnail Bot is running...")
     bot.delete_webhook()   # ← This removes Livegram's webhook
     bot.infinity_polling()
